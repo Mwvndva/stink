@@ -466,12 +466,15 @@ client.on('message', async message => {
 // ======================
 client.on('qr', (qr) => {
   console.log('QR Code received:');
+
   // Generate and log a URL for a scannable QR code image
   const qrCodeUrl = `https://chart.googleapis.com/chart?chs=500x500&cht=qr&chl=${encodeURIComponent(qr)}`;
   console.log('Scan this QR code in your browser:', qrCodeUrl);
-  
-  // Optionally, keep the terminal output for local testing
-  qrcode.generate(qr, { small: true });
+
+  // Only generate terminal QR code in development
+  if (process.env.NODE_ENV !== 'production') {
+    qrcode.generate(qr, { small: true });
+  }
 });
 
 client.on('ready', () => {
