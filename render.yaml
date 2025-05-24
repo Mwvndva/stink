@@ -1,0 +1,21 @@
+services:
+  - type: web
+    name: stink-bot
+    env: node
+    buildCommand: npm install
+    startCommand: node index.js
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: stink-db
+          property: connectionString
+      - key: GROK_API_KEY
+        sync: false
+      - key: CHROME_BIN
+        value: /usr/bin/chromium
+
+databases:
+  - name: stink-db
+    databaseName: stink_bot
+    user: stink_user
+    plan: free 

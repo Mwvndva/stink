@@ -1,0 +1,29 @@
+# Node modules
+node_modules/
+
+# Environment variables
+.env
+
+# Session data
+session-data/
+
+# Logs
+*.log
+logs/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Database files
+*.sqlite
+
+# Build artifacts
+dist/
+build/
+
+# Puppeteer/Chrome cache
+.chromium/
+puppeteer_cache/
+
+.wwebjs_auth/
