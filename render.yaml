@@ -2,7 +2,7 @@ services:
   - type: web
     name: stink-bot
     env: node
-    buildCommand: npm install
+    buildCommand: npm install && node init-db.js
     startCommand: node index.js
     envVars:
       - key: DATABASE_URL
