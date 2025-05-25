@@ -16,6 +16,6 @@ services:
 
 databases:
   - name: stink-db
-    databaseName: stink_bot
-    user: stink_user
+    databaseName: stink_db
+    user: stink_db_user
     plan: free 
