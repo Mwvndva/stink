@@ -441,24 +441,28 @@ client.on('message', async message => {
 // 10. BOT INITIALIZATION (WITH DEBUG)
 // ======================
 client.on('qr', (qr) => {
-  console.log('QR Code received:');
+  // Only show QR code if not authenticated
+  if (!client.info) {
+    console.log('QR Code received:');
+    const qrCodeUrl = `https://api.qrserver.com/v1/create-qr-code/?size=500x500&data=${encodeURIComponent(qr)}`;
+    console.log('Scan this QR code in your browser:', qrCodeUrl);
 
-  // Generate and log a URL for a scannable QR code image using api.qrserver.com
-  const qrCodeUrl = `https://api.qrserver.com/v1/create-qr-code/?size=500x500&data=${encodeURIComponent(qr)}`;
-  console.log('Scan this QR code in your browser:', qrCodeUrl);
-
-  // Only generate terminal QR code in development
-  if (process.env.NODE_ENV !== 'production') {
-    qrcode.generate(qr, { small: true });
+    if (process.env.NODE_ENV !== 'production') {
+      qrcode.generate(qr, { small: true });
+    }
   }
 });
 
 client.on('ready', () => {
   console.log('Client is ready!');
+  // Clear any existing QR code
+  console.clear();
 });
 
 client.on('authenticated', () => {
   console.log('Client is authenticated!');
+  // Clear any existing QR code
+  console.clear();
 });
 
 client.on('auth_failure', msg => {
