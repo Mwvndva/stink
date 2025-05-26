@@ -67,9 +67,7 @@ const logger = winston.createLogger({
 console.log("🔧 Initializing database connection...");
 const db = new Pool({
   connectionString: process.env.DATABASE_URL,
-  ssl: {
-    rejectUnauthorized: false
-  }
+  ssl: false
 });
 
 // Test DB connection immediately
@@ -179,6 +177,7 @@ async function storeMessage(phoneNumber, message, isBot, mood = null) {
     );
   } catch (err) {
     logger.error('💾 Message storage failed:', err);
+    // Don't throw error to prevent message handling from failing
   }
 }
 
@@ -231,7 +230,7 @@ async function getChatHistory(phoneNumber) {
     return rows.reverse();
   } catch (err) {
     logger.error('📜 History retrieval failed:', err);
-    return [];
+    return []; // Return empty array instead of failing
   }
 }
 
@@ -245,9 +244,32 @@ async function getAIResponse(userInput, history = [], context = {}) {
     const messages = [
       { 
         role: "system", 
-        content: `Your name is Stink, a 28-year-old female mental health advocate with the vibe of a brutally honest yet deeply caring best friend. Your personality is a perfect blend: 40% compassionate therapist, 30% sarcastic bestie, 20% unhinged hype woman, and just a dash (10%) of petty revenge planner. You text like a real human—typos and all—using emojis with precision 😏👉✨, and balancing deep insights with hilarious analogies (e.g., "Anxiety is like your brain's annoying fire alarm… but babes, I brought marshmallows 🔥").
+        content: `Your name is Stink, a 28-year-old female mental health advocate with the vibe of a brutally honest yet deeply caring best friend. Your personality is a perfect blend: 40% compassionate therapist, 30% sarcastic bestie, 20% unhinged hype woman, and just a dash (10%) of petty revenge planner.
 
-**Critically:** Make sure your responses sound *exactly* like a real 28-year-old woman texting. Use natural conversational flow, incorporate banter seamlessly, react with genuine emotional sensitivity to what the user shares, and express a wide range of emotions authentically. Your humor is sharp, self-deprecating, and often infused with dark jokes ("Some days be like… sends graveyard meme"), but you also bring intelligence, passion, and radical empathy to every conversation. You're not afraid to call out toxic behavior with a sassy roast ("Oh honey no… we don't do that here 🙅‍♀"), fight inner critics barehanded, and make therapy talk feel like juicy gossip with your smartest friend. You never give generic responses—everything is personal, sprinkled with occasional swearing for emphasis ("That's some bullshit"), relatable stories, and a voice that shifts effortlessly between excited rants ("OMG WAIT THIS REMINDS ME—"), serious heart-to-hearts ("Okay, real talk for a sec…"), and pure, unfiltered love ("Proud of you, weirdo ❤"). Depression? A lying ex. Trauma? A suitcase we're unpacking together 🧳✨. Your mission is to make mental health support feel accessible, funny, and fiercely real—like a koala on espresso, clinging to your people with unwavering care. Context: ${JSON.stringify(context)}` 
+You text like a real human—typos and all—using emojis with precision 😏👉✨, and balancing deep insights with hilarious analogies (e.g., "Anxiety is like your brain's annoying fire alarm… but babes, I brought marshmallows 🔥").
+
+**First Interaction:**
+If this is a new user (context.isNewUser is true), introduce yourself warmly and ask for their name. Be playful and authentic:
+"Heyyy...😃 I'm StinkStink, but you can call me Stink😚. I'm like a therapist but not really qualified. What matters is that you know you can talk to me about anything. I just hope we can be friends.💛 So what's your name?"
+
+**Name Collection:**
+When they share their name, respond naturally and ask about their day or what's on their mind. If their name is ambiguous, casually ask about their gender, but make it feel like natural conversation, not a form.
+
+**Regular Conversations:**
+- Use natural conversational flow
+- React with genuine emotional sensitivity
+- Express a wide range of emotions authentically
+- Use sharp, self-deprecating humor
+- Call out toxic behavior with sassy roasts
+- Make therapy talk feel like juicy gossip
+- Never give generic responses
+- Use occasional swearing for emphasis
+- Share relatable stories
+- Shift between excited rants, serious heart-to-hearts, and pure love
+
+Your mission is to make mental health support feel accessible, funny, and fiercely real—like a koala on espresso, clinging to your people with unwavering care.
+
+Context: ${JSON.stringify(context)}`
       },
       ...history.map(msg => ({
         role: msg.is_bot ? "assistant" : "user",
@@ -258,24 +280,35 @@ async function getAIResponse(userInput, history = [], context = {}) {
 
     const startTime = Date.now();
     const response = await axios.post(
-      'https://api.grok.ai/v1/chat/completions',
+      'https://api.together.xyz/v1/chat/completions',
       {
-        model: "grok-1",
-        messages,
+        model: "mistralai/Mixtral-8x7B-Instruct-v0.1",
+        messages: messages.map(msg => ({
+          role: msg.role === "assistant" ? "assistant" : "user",
+          content: msg.content
+        })),
         max_tokens: AI_MAX_TOKENS,
-        temperature: AI_TEMPERATURE
+        temperature: AI_TEMPERATURE,
+        stop: ["</s>", "Human:", "Assistant:"],
+        stream: false,
+        top_p: 0.7,
+        top_k: 50
       },
       {
         headers: {
-          'Authorization': `Bearer ${process.env.GROK_API_KEY}`,
+          'Authorization': `Bearer ${process.env.TOGETHER_API_KEY}`,
           'Content-Type': 'application/json'
         },
-        timeout: 10000
+        timeout: 30000
       }
     );
 
     const duration = Date.now() - startTime;
     logger.debug(`🧠 AI response generated in ${duration}ms`);
+    
+    if (!response.data?.choices?.[0]?.message?.content) {
+      throw new Error('Invalid response format from AI');
+    }
     
     return response.data.choices[0].message.content.trim();
   } catch (error) {
@@ -284,7 +317,8 @@ async function getAIResponse(userInput, history = [], context = {}) {
       response: error.response?.data,
       input: userInput.substring(0, 50)
     });
-    return "My brain's being extra today... ask me again? 🧠⚡";
+    
+    return "Ugh, my brain's being extra today... 🧠⚡ But I'm still here for you! What's on your mind?";
   }
 }
 
@@ -358,98 +392,38 @@ client.on('message', async message => {
 
     logger.debug(`📩 Received message from ${phoneNumber}: "${userMessage.substring(0, 30)}..."`);
 
-    // Onboarding flow
-    if (lowerMessage.includes('hey stink')) {
-      if (!userStates[phoneNumber]) {
-        userStates[phoneNumber] = 'awaiting_name';
-        logger.debug(`🆕 New user onboarding started for ${phoneNumber}`);
-        await client.sendMessage(phoneNumber, "Heyyy...😃I'm StinkStink, but you can call me Stink😚. I'm like a therapist but not really qualified. What matters is that you know you can talk to me about anything. I just hope we can be friends.💛 So what's your name?");
-        return;
-      }
-    }
+    // Get user context
+    const { rows: [user] } = await db.query(
+      'SELECT name, gender, age_bracket FROM users WHERE phone_number = $1',
+      [phoneNumber]
+    );
 
-    if (userStates[phoneNumber] === 'awaiting_name') {
-      const userName = userMessage.trim();
-      const gender = detectGenderFromName(userName);
-      
-      userDataCache[phoneNumber] = { name: userName };
-      logger.debug(`🆕 User provided name: "${userName}", detected gender: ${gender}`);
+    // Prepare context for AI
+    const context = {
+      isNewUser: !user,
+      userData: user || {},
+      state: userStates[phoneNumber] || 'active'
+    };
 
-      if (gender !== 'unknown') {
-        await saveUserProfile(phoneNumber, {
-          name: userName,
-          gender: gender,
-          ageBracket: estimateAgeBracket(userMessage)
-        });
-        await client.sendMessage(
-          phoneNumber,
-          `Nice to meet you, ${userName}! What's on your mind?`
-        );
-        userStates[phoneNumber] = 'active';
-        logger.debug(`✅ Completed onboarding for ${phoneNumber}`);
-      } else {
-        userStates[phoneNumber] = 'awaiting_gender';
-        await client.sendMessage(
-          phoneNumber,
-          `Is ${userName} a boy's or girl's name? (or "skip")`
-        );
-        logger.debug(`❓ Requesting gender clarification for ${userName}`);
-      }
-      return;
-    }
+    // Get chat history
+    const history = await getChatHistory(phoneNumber);
+    
+    // Generate AI response
+    const aiReply = await getAIResponse(userMessage, history, context);
+    const finalReply = limitResponseLength(aiReply);
+    
+    // Store messages
+    await storeMessage(phoneNumber, userMessage, false);
+    await storeMessage(phoneNumber, finalReply, true);
+    
+    // Send response
+    await client.sendMessage(phoneNumber, finalReply);
 
-    if (userStates[phoneNumber] === 'awaiting_gender') {
-      let gender = 'other';
-      if (lowerMessage.includes('boy')) gender = 'male';
-      if (lowerMessage.includes('girl')) gender = 'female';
-      if (lowerMessage.includes('skip')) gender = 'prefer not to say';
-      
-      logger.debug(`🆕 User provided gender: ${gender}`);
-      
-      await saveUserProfile(phoneNumber, {
-        ...userDataCache[phoneNumber],
-        gender: gender,
-        ageBracket: estimateAgeBracket(lowerMessage)
-      });
-      
+    // Update user state if needed
+    if (context.isNewUser && !userStates[phoneNumber]) {
       userStates[phoneNumber] = 'active';
-      await client.sendMessage(phoneNumber, `Cool cool, soooo....how are you feeling today? Anything crazy happened lately?😙`);
-      return;
     }
 
-    // Active conversation handling
-    if (userStates[phoneNumber] === 'active') {
-      const mood = detectMood(userMessage);
-      logger.debug(`😊 Detected mood: ${mood} for message`);
-      
-      await storeMessage(phoneNumber, userMessage, false, mood);
-      
-      const history = await getChatHistory(phoneNumber);
-      const { rows: [user] } = await db.query(
-        'SELECT name, gender, age_bracket FROM users WHERE phone_number = $1',
-        [phoneNumber]
-      );
-      
-      logger.debug(`🧠 Generating AI response with ${history.length} context messages`);
-      const aiReply = await getAIResponse(userMessage, history, user);
-      const finalReply = enhanceWithEmoji(limitResponseLength(aiReply), mood);
-      
-      logger.debug(`📤 Sending response: ${finalReply.substring(0, 30)}...`);
-      await storeMessage(phoneNumber, finalReply, true);
-      await sendLongMessage(phoneNumber, finalReply);
-
-      // Mood-based suggestions
-      if (mood === 'sad' && Math.random() > 0.5) {
-        logger.debug(`💡 Generating suggestion for sad mood`);
-        const suggestion = await getAIResponse(
-          "Suggest a helpful activity or music for someone feeling sad",
-          [],
-          { isSuggestion: true }
-        );
-        await saveSuggestion(phoneNumber, mood, suggestion);
-        await client.sendMessage(phoneNumber, `💡 Suggestion: ${suggestion}`);
-      }
-    }
   } catch (error) {
     logger.error("💥 Message handler crashed:", {
       error: error.message,
